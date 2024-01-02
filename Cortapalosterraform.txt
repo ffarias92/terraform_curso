@@ -1,0 +1,39 @@
+# terraform init : ejecutar recurso con proveedor terraform por primera vez 
+# terraform plan : revisar lo que ejecutara terraform
+# terraform apply : aplicar terraform
+# terraform destroy : destruir todos los cambios realizados con terraform
+# terraform show : muestra la configuracion aplicada actual (imprime ordenadamente el archivo terraform.tfstate)
+# terraform plan --out "nombre plan" : registra el plan actual aunque el archivo se edite
+# terraform apply "nombre plan" : ejecuta el nombre del plan guardado aunque el archivo se haya utilizado
+# terraform fmt : aplica el formato de terraform a un archivo de texto desordenado(crea identaciones)
+# terraform validate : 
+
+# versionado 
+
+# terraform {
+#   required_providers {
+#       aws = {
+#           source = "hashicorp/aws"
+#           version = "~>4" # que puede usar desde la 4.x.x, es decir cualquiera de los valores en x pero en la main 4
+#       }
+#   }
+#   required_version ="1.3.6"
+# }
+#
+
+
+# versionado proveedor
+
+# terraform {
+#   required_providers {
+#       aws = {
+#           source = "hashicorp/aws"
+#           version = ">=4.36.0, <4.47.0 !=4.43.0" #  mayor a 4.36 menos a 4.47 pero no puede ser la 4.43
+#       }
+#   }
+#   required_version ="1.3.6"
+# }
+#
+provider "aws" {
+    region = "us-east-1"
+}
