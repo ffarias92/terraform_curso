@@ -1,1 +1,3 @@
-s3/.terraform
+4_s3/.terraform
+5_variables/.terraform
+*/.terraform
