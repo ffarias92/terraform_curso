@@ -1,12 +1,38 @@
 # terraform init : ejecutar recurso con proveedor terraform por primera vez 
 # terraform plan : revisar lo que ejecutara terraform
 # terraform apply : aplicar terraform
+    # terraform apply --target "nombre recurso"
+    # terraform apply --replace="nombre recurso" : # esto es aplicar destroy y apply pero dentro del recurso seleccionado
 # terraform destroy : destruir todos los cambios realizados con terraform
 # terraform show : muestra la configuracion aplicada actual (imprime ordenadamente el archivo terraform.tfstate)
+    # terraform show -json : muestra la configuracion aplicada actual pero en formato json
 # terraform plan --out "nombre plan" : registra el plan actual aunque el archivo se edite
 # terraform apply "nombre plan" : ejecuta el nombre del plan guardado aunque el archivo se haya utilizado
 # terraform fmt : aplica el formato de terraform a un archivo de texto desordenado(crea identaciones)
-# terraform validate : 
+# terraform validate : revisa la sintaxis
+# terraform output : muestra los output (salidas configuradas en los archivos .tf)
+# terraform refresh : actualiza el tfstate con los cambios realizados manualmente (fuera de terraform), no actualiza archivos de configuracion
+# terraform graph : crea un grafico mostrando las dependencias de los recursos
+# terraform state list : muestra una lista de los recursos desplegados
+# terraform state show "nombre recurso" : muestra los datos especificamente del recurso especificado
+# terraform state mv "nombre origen" "nombre destino" : cambia el nombre de un recurso en vez de destruirlo y crearlo nuevo
+# terraform state rm "recurso" : elimina del tfstate el recurso para que no sea mas administrado por terraform (no se borra del archivo .tf)
+# terraform taint/untaint "recurso" : marca o desmarca como manchado un recurso en el siguiente apply (lo destruye y crea denuevo)
+# terraform import aws_instance."nombre_recurso" "id_instancia" : importa un recurso no creado por terraform hacia el despliegue tfstate
+
+#logs 
+Niveles de log : 
+
+export TF_LOG=INFO # nivel de detalle de log mas pequeño
+export TF_LOG=WARNING
+export TF_LOG=ERROR
+export TF_LOG=DEBUG
+export TF_LOG=TRACE # nivel de detalle de log mas grande
+
+enviar logs a un archivo :
+
+export TF_LOG_PATH=nombre_archivo.txt
+
 
 # versionado 
 
@@ -34,6 +60,383 @@
 #   required_version ="1.3.6"
 # }
 #
-provider "aws" {
-    region = "us-east-1"
+#provider "aws" {
+#    region = "us-east-1"
+#}
+
+
+# ciclos de vida
+
+Este argumento se utiliza para prevenir la destrucción accidental de un recurso 
+durante la fase de terraform apply. Si se establece en true, 
+Terraform impedirá que el recurso se destruya.
+Esto es útil para recursos que no deben ser eliminados.
+
+#resource "aws_instance" "example" {
+#  # ... otras configuraciones ...
+#  
+#  lifecycle {
+#    prevent_destroy = true
+#  }
+#}
+
+create_before_destroy: Si estableces este argumento en true, 
+Terraform creará un nuevo recurso antes de destruir el recurso existente durante un terraform apply. 
+Esto es útil para implementar actualizaciones de manera segura, 
+asegurándote de que el nuevo recurso esté operativo antes de eliminar el antiguo.
+
+#resource "aws_instance" "example" {
+#  # ... otras configuraciones ...
+#  
+#  lifecycle {
+#    create_before_destroy = true
+#  }
+#}
+
+ignore_changes: Este argumento permite a Terraform ignorar cambios específicos en el recurso 
+durante la fase de planificación. 
+Puedes proporcionar una lista de atributos 
+que no deben ser considerados para actualizar el recurso.
+
+#resource "aws_instance" "example" {
+#  # ... otras configuraciones ...
+#  
+#  lifecycle {
+#    ignore_changes = [
+#      # Lista de atributos a ignorar durante los cambios
+#      "tags",
+#      "metadata"
+#    ]
+#  }
+#}
+
+
+# provisioner con local-exec
+
+En este ejemplo, cada vez que crees una instancia EC2 con esta configuración, 
+Terraform ejecutará el comando 
+echo 'La instancia se ha creado' > instance_created.txt 
+en tu máquina local después de que la instancia haya sido creada.
+
+resource "aws_instance" "example" {
+  ami           = "ami-0c55b159cbfafe1f0"
+  instance_type = "t2.micro"
+
+  provisioner "local-exec" {
+    command = "echo 'La instancia se ha creado' > instance_created.txt"
+  }
 }
+
+
+# provisioner con remote-exec
+
+En este ejemplo, después de que Terraform cree la instancia EC2, 
+usará la conexión SSH para conectarse a la instancia 
+y ejecutar los comandos proporcionados en el bloque inline.
+
+resource "aws_instance" "example" {
+  ami           = "ami-0c55b159cbfafe1f0"
+  instance_type = "t2.micro"
+
+  provisioner "remote-exec" {
+    connection {
+      type     = "ssh"
+      user     = "ec2-user"
+      private_key = file("~/.ssh/id_rsa")  # Asume que tienes una clave privada SSH en esta ubicación
+      host     = aws_instance.example.public_ip
+    }
+
+    inline = [
+      "sudo yum install -y nginx",
+      "sudo systemctl start nginx"
+    ]
+  }
+
+  tags = {
+    Name = "example-instance"
+  }
+}
+
+# ejemplo de connection
+
+resource "aws_instance" "example" {
+  ami           = "ami-0c55b159cbfafe1f0"
+  instance_type = "t2.micro"
+
+  provisioner "remote-exec" {
+    connection {
+      type        = "ssh"
+      user        = "ec2-user"              # Usuario para conectarse a la instancia EC2
+      private_key = file("~/.ssh/id_rsa")   # Ruta a tu clave privada SSH
+      host        = aws_instance.example.public_ip  # IP pública de la instancia EC2
+    }
+
+    inline = [
+      "echo 'Este es un comando ejecutado remotamente.'"
+    ]
+  }
+
+  tags = {
+    Name = "example-instance"
+  }
+}
+
+#for each
+
+para trabajar con elementos de una lista, es mejor trabajar con for each en vez de count, 
+ya que toma los elementos como un map
+y no como un count, asi terraform tiene identificado el valor de cada uno
+
+variable "instancias" {
+    description = "nombre de las instancias"
+    type = set(string)
+    default = "mysql", "jumpserver" # aqui esta la lista
+}
+
+resource "aws_instance" "public_instance" {
+    for_each = var.instacias # toma el valor de cada elemento de la lista, no del lugar que ocupa(numero)
+    ami = var.ec2_specs.ami
+    instance_type = var.ec2_specs.instance_type
+    subnet_id = aws_subnet.public_subnet.id
+    key_name = data.aws_key_pair.key.key_name
+    vpc_security_groups_ids = [aws_security_group.seg_public_instance.id]
+    user_data = file("scripts/userdata.sh")
+
+
+    tags = {
+        "Name" = each.value
+    }
+}
+
+toset 
+
+ la opción toset se utiliza para convertir un valor o conjunto de valores en un tipo de dato "set". Un "set" en Terraform es una colección no ordenada de valores únicos. Esto puede ser útil en situaciones donde deseas asegurarte de que una variable o atributo tenga valores únicos y no duplicados.
+
+Aquí hay un ejemplo básico para ilustrar cómo funciona toset:
+
+variable "names" {
+  type = list(string)
+  default = ["Alice", "Bob", "Charlie", "Alice", "Bob"]
+}
+
+output "unique_names" {
+  value = toset(var.names)
+}
+
+
+#terraform console # te envia a una consola de terraform para debugear y probar variables
+
+cumple funciones aritmeticas : sumas, restas, multiplicaciones y divisiones
+
+ceil = aproxima hacia arriba 12.1 lo transforma en 13
+floor = aproxima hacia abajo 12.9 lo transforma en 12
+length = cuenta listas, palabras y etc 
+max = devuelve el numero mas grande de unos numeros (1,3,500,12) -> devuelve 500
+min = devuelve el numero mas pequeño de unos numeros (1,3,500,-1) -> devuelve -1
+split (",") = corta con el caracter asignado
+join("-",) = une palabras con el caracter asignado
+index("elemento") = busca cuantas veces existe el elemento en la lista, si no existe da ERROR
+element("elemento") = busca el lugar que ocupa el elemento en la lista
+contains("elemento") = boolean que revisa la existencia de un elemento (true,false)
+keys, values =  enlista valores
+
+
+# Estructura condicional
+
+en resumen es un If condicional con true false 
+
+Para booleanos : 
+
+variable "enable_monitoring" {
+    description = "Habilita el despliegue de un servidor de monitoreo"
+    type = bool
+}
+
+tenemos dos opciones :
+
+enable_monitoring = "true" # activa el despliegue
+enable_monitoring = "false" # niega el despliegue
+
+resource "aws_instance" "monitoring_instance" {
+    count = var.enable_monitoring ? 1 : 0 # 1 es true, 0 es false 
+    ami = "ejemplo ami"
+    ...
+    ...
+}
+
+
+con numeros : 
+
+
+variable "enable_monitoring" {
+    description = "Habilita el despliegue de un servidor de monitoreo"
+    type = number
+}
+
+tenemos dos opciones :
+
+enable_monitoring = 1 # activa el despliegue
+enable_monitoring = 0 # niega el despliegue
+
+resource "aws_instance" "monitoring_instance" {
+    count = var.enable_monitoring == 1 ? 1 : 0 # aca activa el despliegue, le estamos entregando un 1, de ser un 0 lo negaria
+    ami = "ejemplo ami"
+    ...
+    ...
+}
+
+
+locales : 
+
+promueven la reutilizacion de codigo, evitando el DRY y redundancias
+
+ejemplo : 
+
+locals {
+  region          = "us-west-1"
+  instance_type   = "t2.micro"
+  ami_id          = "ami-0c55b159cbfafe1f0"
+  tags     = {
+    Environment = "production"
+    Owner       = "team@example.com"
+  }
+}
+
+resource "aws_instance" "example_instance" {
+  ami           = local.ami_id
+  instance_type = local.instance_type
+  tags          = local.tags
+}
+
+
+## Bloque dinamico :
+
+bloque dinámico" se refiere a una manera de generar múltiples bloques de configuración 
+de forma dinámica en función de una lista o mapa.
+Esto es útil cuando no sabes de antemano cuántos bloques de configuración necesitarás,
+como cuando deseas crear múltiples recursos similares.
+
+crear variables y recursos : 
+
+variable "instance_count" {
+  description = "Número de instancias a crear"
+  default     = 3
+}
+
+resource "aws_instance" "example" {
+  count = var.instance_count
+
+  ami           = "ami-0c55b159cbfafe1f0"
+  instance_type = "t2.micro"
+
+  tags = {
+    Name = "Instance-${count.index}"
+  }
+}
+
+
+Invocar bloques dinamicos para discos EBS 
+
+variable "instance_types" {
+  description = "Tipos de instancia a crear"
+  type        = list(string)
+  default     = ["t2.micro", "t2.medium", "t2.large"]
+}
+
+resource "aws_instance" "example" {
+  count = length(var.instance_types)
+
+  ami           = "ami-0c55b159cbfafe1f0"
+  instance_type = var.instance_types[count.index]
+
+  dynamic "ebs_block" {
+    for_each = [1, 2]  # Ejemplo de 2 volúmenes EBS por instancia
+    content {
+      device_name           = "/dev/sdh${ebs_block.key}"
+      volume_type           = "gp2"
+      volume_size           = 8
+      delete_on_termination = true
+    }
+  }
+
+  tags = {
+    Name = "Instance-${count.index}"
+  }
+}
+
+
+Modulos :
+
+orden de ruta en los modulos : 
+
+terraform-module-ec2/
+├── main.tf
+├── variables.tf
+└── outputs.tf
+
+archivo main.tf
+
+resource "aws_instance" "example" {
+  ami           = var.ami_id
+  instance_type = var.instance_type
+
+  tags = {
+    Name = var.instance_name
+  }
+}
+
+archivo variables.tf 
+
+variable "ami_id" {
+  description = "AMI ID para la instancia EC2"
+  type        = string
+}
+
+variable "instance_type" {
+  description = "Tipo de instancia EC2"
+  type        = string
+  default     = "t2.micro"
+}
+
+variable "instance_name" {
+  description = "Nombre de la instancia EC2"
+  type        = string
+  default     = "example-instance"
+}
+
+outputs.tf
+
+output "instance_id" {
+  description = "ID de la instancia EC2 creada"
+  value       = aws_instance.example.id
+}
+
+output "instance_public_ip" {
+  description = "IP pública de la instancia EC2"
+  value       = aws_instance.example.public_ip
+}
+
+uso del modulo :
+
+module "ec2_example" {
+  source      = "./terraform-module-ec2"
+  ami_id      = "ami-0c55b159cbfafe1f0"  # AMI ID específico de tu elección
+  instance_type = "t2.micro"
+  instance_name = "my-instance"
+}
+
+output "module_instance_id" {
+  value = module.ec2_example.instance_id
+}
+
+output "module_instance_ip" {
+  value = module.ec2_example.instance_public_ip
+}
+
+
+Herramientas complementarias :
+
+infracost : revisa los costos de la ejecucion
+tfsec : revisa la seguridad de los deploy
+tflint : valida la configuracion pero con esteroides
+tfenvironment (tfenv) :  cambia la version de terraform de forma manual
